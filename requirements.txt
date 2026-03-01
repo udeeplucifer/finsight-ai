@@ -1,0 +1,9 @@
+streamlit
+yfinance
+plotly
+duckduckgo-search
+agno
+google-generativeai
+python-dotenv
+fpdf
+kaleido
