@@ -4,6 +4,7 @@ plotly
 duckduckgo-search
 agno
 google-generativeai
+google-genai
 python-dotenv
 fpdf
 kaleido
