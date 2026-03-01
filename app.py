@@ -12,12 +12,16 @@ from agno.models.google import Gemini
 from dotenv import load_dotenv
 from fpdf import FPDF
 
-# 1. Base Setup
+# 1. Base Setup & Cloud API Key Logic
 load_dotenv()
-api_key = os.getenv("GOOGLE_API_KEY")
+try:
+    api_key = st.secrets["GOOGLE_API_KEY"]
+except Exception:
+    api_key = os.getenv("GOOGLE_API_KEY")
+
 st.set_page_config(page_title="FinSight AI", layout="wide")
 
-# 2. UI & News Ticker CSS (Fixed Padding for Buttons)
+# 2. UI & News Ticker CSS
 st.markdown("""
     <style>
         .block-container { max-width: 98% !important; padding: 1rem !important; padding-bottom: 80px !important; }
@@ -34,7 +38,7 @@ def clean_for_pdf(text):
     text = unicodedata.normalize('NFKD', str(text)).encode('ascii', 'ignore').decode('ascii')
     return "".join(c for c in text if 32 <= ord(c) <= 126)
 
-# 4. Premium PDF Generator
+# 4. Premium PDF Generator (Safe for both FPDF1 & FPDF2)
 def generate_pdf(symbol, data, fig1, fig2):
     pdf = FPDF()
     pdf.add_page()
@@ -84,9 +88,16 @@ def generate_pdf(symbol, data, fig1, fig2):
     except Exception:
         pass
 
-    return bytes(pdf.output())
+    # Safe Return for different FPDF versions
+    try:
+        out = pdf.output()
+        if isinstance(out, str):
+            return out.encode('latin-1')
+        return bytes(out)
+    except Exception:
+        return pdf.output(dest='S').encode('latin-1')
 
-# 5. Core Data Sync Logic with Fundamentals
+# 5. Core Data Sync Logic with Error Debugging
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_analysis(symbol):
     try:
@@ -138,7 +149,9 @@ def fetch_analysis(symbol):
             "bears_list": ai_json.get("bears", ["Market risks.", "Global uncertainty."]),
             "verdict": str(ai_json.get("verdict", "HOLD"))
         }
-    except: return None
+    except Exception as e:
+        st.error(f"🔍 System Error: {str(e)}")
+        return None
 
 # 6. Sidebar Controls
 with st.sidebar:
@@ -148,7 +161,7 @@ with st.sidebar:
     compare_code = st.text_input("Compare with (Optional):", placeholder="e.g. AAPL").upper()
     run = st.button("🚀 Generate Full Report", use_container_width=True)
 
-# 7. Rendering Logic (Fixed Landing Page & Comparison Logic)
+# 7. Rendering Logic
 if run and s_code:
     d = fetch_analysis(s_code)
     if d:
@@ -178,7 +191,6 @@ if run and s_code:
             st.plotly_chart(fig_loss, use_container_width=True)
 
         if compare_code:
-            # Fixed: Prevent same stock comparison
             if compare_code == s_code:
                 st.warning(f"⚠️ Comparison stock cannot be the same as the main stock ({s_code}). Please enter a different symbol.")
             else:
@@ -186,49 +198,4 @@ if run and s_code:
                 st.markdown(f"⚔️ **Growth Comparison: {s_code} vs {compare_code}**")
                 with st.spinner(f"Fetching data for {compare_code}..."):
                     try:
-                        df_comp = yf.Ticker(compare_code).history(period="3y")
-                        if not df_comp.empty:
-                            fig_comp = go.Figure()
-                            growth_main = (d['df']['Close'] / d['df']['Close'].iloc[0] - 1) * 100
-                            growth_sec = (df_comp['Close'] / df_comp['Close'].iloc[0] - 1) * 100
-                            fig_comp.add_trace(go.Scatter(x=d['df'].index, y=growth_main, name=s_code, line=dict(color='#00FF00', width=2)))
-                            fig_comp.add_trace(go.Scatter(x=df_comp.index, y=growth_sec, name=compare_code, line=dict(color='#1E90FF', width=2)))
-                            fig_comp.update_layout(height=300, margin=dict(l=0,r=0,t=0,b=0), template="plotly_dark", yaxis_title="Growth (%)")
-                            st.plotly_chart(fig_comp, use_container_width=True)
-                        else:
-                            st.warning(f"Could not find data for {compare_code}")
-                    except Exception:
-                        st.warning("Comparison failed. Check the second symbol.")
-
-        st.markdown("---")
-        
-        s1, s2 = st.columns(2)
-        with s1:
-            st.success("**🐂 Bullish Insights:**")
-            for p in d['bulls_list']: st.write(f"✅ {p}")
-        with s2:
-            st.error("**🐻 Bearish Risks:**")
-            for p in d['bears_list']: st.write(f"⚠️ {p}")
-
-        st.markdown("---")
-        
-        dl_col1, dl_col2 = st.columns(2)
-        with dl_col1:
-            pdf_out = generate_pdf(s_code, d, fig_profit, fig_loss)
-            st.download_button(label="📥 Download Pro PDF Report", data=pdf_out, file_name=f"{s_code}_Pro_Report.pdf", mime="application/pdf", use_container_width=True)
-        with dl_col2:
-            csv_data = d['df'].to_csv().encode('utf-8')
-            st.download_button(label="📊 Download Historical Data (CSV)", data=csv_data, file_name=f"{s_code}_historical_data.csv", mime="text/csv", use_container_width=True)
-
-        ticker_txt = "  •  ".join(d['news'])
-        st.markdown(f'<div class="ticker-wrap"><div class="ticker">{ticker_txt}</div></div>', unsafe_allow_html=True)
-    else:
-        st.error("Data Sync Failed. Check symbol format.")
-
-elif run and not s_code:
-    st.warning("Please enter a valid Stock Symbol to generate the report.")
-    
-else:
-    # Fixed: Landing Page UI
-    st.markdown("<h1 style='text-align: center; margin-top: 15vh; color: #4A90E2;'>📊 Welcome to FinSight AI</h1>", unsafe_allow_html=True)
-    st.markdown("<h4 style='text-align: center; color: #A0A0A0;'>Enter a stock symbol in the sidebar to generate your AI-powered financial report.</h4>", unsafe_allow_html=True)
+                        df_comp = yf.Ticker(compare_code).history(period="
