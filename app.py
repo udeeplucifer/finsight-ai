@@ -198,4 +198,5 @@ if run and s_code:
                 st.markdown(f"⚔️ **Growth Comparison: {s_code} vs {compare_code}**")
                 with st.spinner(f"Fetching data for {compare_code}..."):
                     try:
-                        df_comp = yf.Ticker(compare_code).history(period="
+                        df_comp = yf.Ticker(compare_code).history(period="3y")
+
