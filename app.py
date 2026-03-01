@@ -199,4 +199,47 @@ if run and s_code:
                 with st.spinner(f"Fetching data for {compare_code}..."):
                     try:
                         df_comp = yf.Ticker(compare_code).history(period="3y")
+                        if not df_comp.empty:
+                            fig_comp = go.Figure()
+                            growth_main = (d['df']['Close'] / d['df']['Close'].iloc[0] - 1) * 100
+                            growth_sec = (df_comp['Close'] / df_comp['Close'].iloc[0] - 1) * 100
+                            fig_comp.add_trace(go.Scatter(x=d['df'].index, y=growth_main, name=s_code, line=dict(color='#00FF00', width=2)))
+                            fig_comp.add_trace(go.Scatter(x=df_comp.index, y=growth_sec, name=compare_code, line=dict(color='#1E90FF', width=2)))
+                            fig_comp.update_layout(height=300, margin=dict(l=0,r=0,t=0,b=0), template="plotly_dark", yaxis_title="Growth (%)")
+                            st.plotly_chart(fig_comp, use_container_width=True)
+                        else:
+                            st.warning(f"Could not find data for {compare_code}")
+                    except Exception:
+                        st.warning("Comparison failed. Check the second symbol.")
 
+        st.markdown("---")
+        
+        s1, s2 = st.columns(2)
+        with s1:
+            st.success("**🐂 Bullish Insights:**")
+            for p in d['bulls_list']: st.write(f"✅ {p}")
+        with s2:
+            st.error("**🐻 Bearish Risks:**")
+            for p in d['bears_list']: st.write(f"⚠️ {p}")
+
+        st.markdown("---")
+        
+        dl_col1, dl_col2 = st.columns(2)
+        with dl_col1:
+            pdf_out = generate_pdf(s_code, d, fig_profit, fig_loss)
+            st.download_button(label="📥 Download Pro PDF Report", data=pdf_out, file_name=f"{s_code}_Pro_Report.pdf", mime="application/pdf", use_container_width=True)
+        with dl_col2:
+            csv_data = d['df'].to_csv().encode('utf-8')
+            st.download_button(label="📊 Download Historical Data (CSV)", data=csv_data, file_name=f"{s_code}_historical_data.csv", mime="text/csv", use_container_width=True)
+
+        ticker_txt = "  •  ".join(d['news'])
+        st.markdown(f'<div class="ticker-wrap"><div class="ticker">{ticker_txt}</div></div>', unsafe_allow_html=True)
+    else:
+        st.error("Data Sync Failed. Check symbol format.")
+
+elif run and not s_code:
+    st.warning("Please enter a valid Stock Symbol to generate the report.")
+    
+else:
+    st.markdown("<h1 style='text-align: center; margin-top: 15vh; color: #4A90E2;'>📊 Welcome to FinSight AI</h1>", unsafe_allow_html=True)
+    st.markdown("<h4 style='text-align: center; color: #A0A0A0;'>Enter a stock symbol in the sidebar to generate your AI-powered financial report.</h4>", unsafe_allow_html=True)
