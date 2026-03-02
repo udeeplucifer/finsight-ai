@@ -12,234 +12,299 @@ from agno.models.google import Gemini
 from dotenv import load_dotenv
 from fpdf import FPDF
 
-# 1. Base Setup & Cloud API Key Logic
+# 1. Base Setup
 load_dotenv()
 try:
     api_key = st.secrets["GOOGLE_API_KEY"]
-except Exception:
+except:
     api_key = os.getenv("GOOGLE_API_KEY")
 
-st.set_page_config(page_title="FinSight AI", layout="wide")
+st.set_page_config(page_title="FinSight AI Pro", layout="wide")
 
-# 2. UI & News Ticker CSS
+# 2. UI Styling
 st.markdown("""
     <style>
-        .block-container { max-width: 98% !important; padding: 1rem !important; padding-bottom: 80px !important; }
-        div[data-testid="metric-container"] { background-color: #1E1E2E; border-radius: 10px; padding: 15px; text-align: center; }
+        .block-container { max-width: 98% !important; padding-top: 4rem !important; padding-bottom: 100px !important; padding-left: 1rem !important; padding-right: 1rem !important; }
+        [data-testid="stMetric"] { background-color: #1E1E2E; border-radius: 10px; padding: 15px; border: 1px solid #3E3E4E; }
         .ticker-wrap { width: 100%; overflow: hidden; background: #4A90E2; color: white; padding: 12px 0; position: fixed; bottom: 0; left: 0; z-index: 999; }
         .ticker { display: inline-block; white-space: nowrap; animation: ticker 60s linear infinite; font-size: 16px; font-weight: bold; }
+        th, td { text-align: left !important; font-size: 16px; }
         @keyframes ticker { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
     </style>
 """, unsafe_allow_html=True)
 
-# 3. Enhanced Character Cleaner for PDF
+# 3. Helpers
 def clean_for_pdf(text):
     if not text: return ""
     text = unicodedata.normalize('NFKD', str(text)).encode('ascii', 'ignore').decode('ascii')
     return "".join(c for c in text if 32 <= ord(c) <= 126)
 
-# 4. Premium PDF Generator (Safe for both FPDF1 & FPDF2)
-def generate_pdf(symbol, data, fig1, fig2):
+def calculate_rsi(data, window=14):
+    delta = data.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
+def get_sector_benchmark(symbol, sector):
+    if symbol.endswith(".NS") or symbol.endswith(".BO"):
+        nifty = {"Technology": "^CNXIT", "Financial Services": "^NSEBANK", "Healthcare": "^CNXPHARMA", "Consumer Cyclical": "^CNXAUTO"}
+        return nifty.get(sector, "^NSEI") 
+    else:
+        us_etfs = {"Technology": "XLK", "Healthcare": "XLV", "Financial Services": "XLF", "Consumer Cyclical": "XLY", "Industrials": "XLI"}
+        return us_etfs.get(sector, "^GSPC") 
+
+# 4. Pro PDF Generator
+def generate_pro_pdf(symbol, data, fig_p, fig_l, fig_gauge, fig_comp, comp_ticker=None, comp_data=None):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_margins(15, 15, 15)
-    
     pdf.set_font("Helvetica", 'B', 20)
-    pdf.cell(180, 15, clean_for_pdf(f"FINSIGHT AI REPORT: {symbol}"), ln=True, align='C')
+    pdf.cell(180, 15, clean_for_pdf(f"FINSIGHT PRO REPORT: {symbol}"), ln=True, align='C')
     pdf.ln(5)
-    
     pdf.set_font("Helvetica", 'B', 12)
-    pdf.cell(180, 10, clean_for_pdf(f"Price: ${data['price']:.2f} | Growth: {data['growth']:.2f}% | Verdict: {data['verdict']}"), ln=True, align='C')
-    pdf.ln(10)
-    
-    pdf.set_font("Helvetica", 'B', 14)
-    pdf.set_text_color(46, 125, 50)
-    pdf.cell(180, 10, "BULLISH INSIGHTS", ln=True)
-    pdf.set_font("Helvetica", '', 11)
-    pdf.set_text_color(0, 0, 0)
-    for p in data['bulls_list']:
-        pdf.set_x(15)
-        pdf.multi_cell(180, 8, clean_for_pdf(f"- {p}"))
-    pdf.ln(5)
-
-    pdf.set_font("Helvetica", 'B', 14)
-    pdf.set_text_color(211, 47, 47)
-    pdf.cell(180, 10, "BEARISH RISKS", ln=True)
-    pdf.set_font("Helvetica", '', 11)
-    pdf.set_text_color(0, 0, 0)
-    for p in data['bears_list']:
-        pdf.set_x(15)
-        pdf.multi_cell(180, 8, clean_for_pdf(f"- {p}"))
+    pdf.cell(180, 10, clean_for_pdf(f"Price: ${data['price']:.2f} | Sector: {data['fund']['sector']} | Verdict: {data['ai']['verdict']}"), ln=True, align='C')
     
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as t1, \
-             tempfile.NamedTemporaryFile(delete=False, suffix=".png") as t2:
-            fig1.write_image(t1.name, width=800, height=400)
-            fig2.write_image(t2.name, width=800, height=400)
+             tempfile.NamedTemporaryFile(delete=False, suffix=".png") as t2, \
+             tempfile.NamedTemporaryFile(delete=False, suffix=".png") as t3:
+            
+            fig_p.write_image(t1.name, width=800, height=400)
+            fig_l.write_image(t2.name, width=800, height=400)
+            fig_comp.write_image(t3.name, width=800, height=400)
+            
+            pdf.image(t1.name, x=15, w=180)
+            pdf.image(t2.name, x=15, w=180)
+            
             pdf.add_page()
             pdf.set_font("Helvetica", 'B', 14)
-            pdf.cell(180, 10, "PROFIT TREND & SMA", ln=True, align='C')
-            pdf.image(t1.name, x=15, w=180)
-            pdf.ln(5)
-            pdf.cell(180, 10, "LOSS TREND (LOWS)", ln=True, align='C')
-            pdf.image(t2.name, x=15, w=180)
+            pdf.cell(180, 10, "GROWTH COMPARISON", ln=True, align='C')
+            pdf.image(t3.name, x=15, w=180)
+            
+            # Head-to-Head Stats for PDF
+            if comp_ticker and comp_data:
+                pdf.ln(10)
+                pdf.set_font("Helvetica", 'B', 14)
+                pdf.cell(180, 10, "HEAD-TO-HEAD STATS", ln=True, align='C')
+                pdf.ln(5)
+                pdf.set_font("Helvetica", 'B', 11)
+                
+                # Table Header
+                pdf.cell(60, 10, "Metric", border=1, align='C')
+                pdf.cell(60, 10, clean_for_pdf(symbol), border=1, align='C')
+                pdf.cell(60, 10, clean_for_pdf(comp_ticker), border=1, align='C', ln=True)
+                
+                # Table Rows
+                pdf.set_font("Helvetica", '', 11)
+                metrics = [
+                    ("Sector", data['fund']['sector'], comp_data['fund']['sector']),
+                    ("Price", f"${data['price']:.2f}", f"${comp_data['price']:.2f}"),
+                    ("Market Cap", data['fund']['mcap'], comp_data['fund']['mcap']),
+                    ("P/E Ratio", str(data['fund']['pe']), str(comp_data['fund']['pe'])),
+                    ("AI Verdict", data['ai']['verdict'], comp_data['ai']['verdict'])
+                ]
+                for m, v1, v2 in metrics:
+                    pdf.cell(60, 10, clean_for_pdf(m), border=1)
+                    pdf.cell(60, 10, clean_for_pdf(v1), border=1, align='C')
+                    pdf.cell(60, 10, clean_for_pdf(v2), border=1, align='C', ln=True)
+
         os.remove(t1.name)
         os.remove(t2.name)
-    except Exception:
-        pass
+        os.remove(t3.name)
+    except: pass
 
-    # Safe Return for different FPDF versions
+    pdf.add_page()
+    pdf.set_font("Helvetica", 'B', 14)
+    pdf.cell(180, 10, "AI ANALYSIS", ln=True)
+    pdf.set_font("Helvetica", '', 11)
+    
+    pdf.set_text_color(46, 125, 50)
+    pdf.cell(180, 8, "Bullish:", ln=True)
+    pdf.set_text_color(0, 0, 0)
+    for b in data['ai']['bulls']: pdf.multi_cell(180, 8, clean_for_pdf(f"- {b}"))
+    
+    pdf.ln(5)
+    pdf.set_text_color(211, 47, 47)
+    pdf.cell(180, 8, "Bearish:", ln=True)
+    pdf.set_text_color(0, 0, 0)
+    for b in data['ai']['bears']: pdf.multi_cell(180, 8, clean_for_pdf(f"- {b}"))
+
     try:
         out = pdf.output()
-        if isinstance(out, str):
-            return out.encode('latin-1')
-        return bytes(out)
-    except Exception:
+        return out.encode('latin-1') if isinstance(out, str) else bytes(out)
+    except:
         return pdf.output(dest='S').encode('latin-1')
 
-# 5. Core Data Sync Logic with Error Debugging
+# 5. Data Engine
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_analysis(symbol):
     try:
         ticker = yf.Ticker(symbol)
         df = ticker.history(period="3y")
         if df.empty: return None
-        
         df['SMA_50'] = df['Close'].rolling(window=50).mean()
-        df['SMA_200'] = df['Close'].rolling(window=200).mean()
-        
+        df['RSI'] = calculate_rsi(df['Close'])
         curr_p = df['Close'].iloc[-1]
-        gr = ((curr_p - df['Close'].iloc[0]) / df['Close'].iloc[0]) * 100
+        
+        info = ticker.info
+        mcap = info.get('marketCap', 0)
+        pe = info.get('trailingPE', 'N/A')
+        sector = info.get('sector', 'Market')
+        
+        def fmt(n):
+            if not isinstance(n, (int, float)) or n == 0: return "N/A"
+            if n >= 1e12: return f"{n/1e12:.2f}T"
+            if n >= 1e9: return f"{n/1e9:.2f}B"
+            return f"{n/1e6:.2f}M"
+        fund = {"mcap": f"${fmt(mcap)}", "pe": round(pe, 2) if isinstance(pe, (int, float)) else pe, "sector": sector}
 
+        fin_data = None
         try:
-            info = ticker.info
-            mcap = info.get('marketCap', 0)
-            pe = info.get('trailingPE', 'N/A')
-            
-            def fmt(n):
-                if not isinstance(n, (int, float)) or n == 0: return "N/A"
-                if n >= 1e12: return f"{n/1e12:.2f}T"
-                if n >= 1e9: return f"{n/1e9:.2f}B"
-                if n >= 1e6: return f"{n/1e6:.2f}M"
-                return str(n)
-                
-            fund_data = {
-                "mcap": f"${fmt(mcap)}" if fmt(mcap) != "N/A" else "N/A",
-                "pe": round(pe, 2) if isinstance(pe, (int, float)) else pe
-            }
-        except:
-            fund_data = {"mcap": "N/A", "pe": "N/A"}
-
-        news = []
-        try:
-            with DDGS() as ddgs:
-                res = list(ddgs.news(symbol, max_results=5))
-                news = [n['title'] for n in res]
-        except: news = ["Market volatility analysis active."]
+            inc = ticker.income_stmt
+            if not inc.empty:
+                rev_key = next((k for k in ['Total Revenue', 'Operating Revenue'] if k in inc.index), None)
+                net_key = next((k for k in ['Net Income', 'Net Income Common Stockholders'] if k in inc.index), None)
+                if rev_key and net_key:
+                    rev = inc.loc[rev_key].dropna()[:3][::-1]
+                    net = inc.loc[net_key].dropna()[:3][::-1]
+                    dates = [d.strftime('%Y') for d in rev.index]
+                    fin_data = {"dates": dates, "revenue": rev.tolist(), "net_income": net.tolist()}
+        except: pass
 
         agent = Agent(model=Gemini(id="gemini-2.0-flash", api_key=api_key))
-        prompt = f"Analyze {symbol} (Price: {curr_p}). News: {news}. Return ONLY JSON with 'bulls' and 'bears' as LISTS of 2 points, and 'verdict'."
+        prompt = f"""Analyze {symbol} in {sector}. Return strictly a JSON object. 
+        Format exactly like this:
+        {{"bulls": ["Point 1", "Point 2", "Point 3"], "bears": ["Point 1", "Point 2", "Point 3"], "verdict": "BUY/HOLD/SELL", "score": 50}}"""
         resp = agent.run(prompt)
-        match = re.search(r'\{.*\}', resp.content.strip(), re.DOTALL)
-        ai_json = json.loads(match.group())
+        
+        try:
+            clean_json = re.sub(r'```json\s*', '', resp.content.strip())
+            clean_json = re.sub(r'```\s*', '', clean_json)
+            match = re.search(r'\{.*\}', clean_json, re.DOTALL)
+            ai_json = json.loads(match.group()) if match else {}
+        except: ai_json = {}
 
-        return {
-            "df": df, "price": curr_p, "growth": gr, "news": news, "fund": fund_data,
-            "bulls_list": ai_json.get("bulls", ["Positive momentum.", "Stable growth."]),
-            "bears_list": ai_json.get("bears", ["Market risks.", "Global uncertainty."]),
-            "verdict": str(ai_json.get("verdict", "HOLD"))
-        }
-    except Exception as e:
-        st.error(f"🔍 System Error: {str(e)}")
-        return None
+        bulls = ai_json.get('bulls', [])
+        if not isinstance(bulls, list) or len(bulls) < 3:
+            bulls = ["Strong market position.", "Positive revenue trends.", "Solid technical support."]
+            
+        bears = ai_json.get('bears', [])
+        if not isinstance(bears, list) or len(bears) < 3:
+            bears = ["Macroeconomic volatility.", "Sector headwinds.", "Profit-taking resistance."]
+            
+        verdict = ai_json.get('verdict', 'HOLD')
+        if not verdict or verdict == 'N/A' or verdict not in ['BUY', 'HOLD', 'SELL', 'STRONG BUY', 'STRONG SELL']:
+            verdict = 'HOLD'
 
-# 6. Sidebar Controls
+        ai_data = {"bulls": bulls, "bears": bears, "verdict": verdict, "score": ai_json.get('score', 50)}
+        return {"df": df, "price": curr_p, "fund": fund, "ai": ai_data, "fin_data": fin_data}
+    except: return None
+
+# 6. Sidebar
 with st.sidebar:
-    st.markdown("<h2 style='color: #4A90E2;'>📊 FinSight AI</h2>", unsafe_allow_html=True)
-    st.markdown("---")
-    s_code = st.text_input("Main Stock (e.g. RELIANCE.NS, TSLA):").upper()
-    compare_code = st.text_input("Compare with (Optional):", placeholder="e.g. AAPL").upper()
-    run = st.button("🚀 Generate Full Report", use_container_width=True)
+    st.title("📊 FinSight AI")
+    main_ticker = st.text_input("Main Stock (e.g. NVDA):").upper()
+    comp_ticker = st.text_input("Compare with (Optional):", placeholder="e.g. AAPL").upper()
+    run = st.button("🚀 Run Analysis", use_container_width=True)
 
 # 7. Rendering Logic
-if run and s_code:
-    d = fetch_analysis(s_code)
-    if d:
-        m1, m2, m3, m4, m5 = st.columns(5)
-        m1.metric("Stock", s_code)
-        m2.metric("Price", f"${d['price']:.2f}")
-        m3.metric("Market Cap", d['fund']['mcap'])
-        m4.metric("P/E Ratio", d['fund']['pe'])
-        m5.metric("Verdict", d['verdict'])
-        
+if run and main_ticker:
+    with st.spinner("Analyzing market intelligence..."):
+        data = fetch_analysis(main_ticker)
+        comp_data = fetch_analysis(comp_ticker) if comp_ticker and comp_ticker != main_ticker else None
+
+    if data:
+        cols = st.columns(5)
+        cols[0].metric("Stock", main_ticker)
+        cols[1].metric("Sector", data['fund']['sector'])
+        cols[2].metric("Price", f"${data['price']:.2f}")
+        cols[3].metric("Market Cap", data['fund']['mcap'])
+        cols[4].metric("Verdict", data['ai']['verdict'])
         st.markdown("---")
         
+        st.subheader("📈 Intelligence Charts")
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown("📈 **Profit Trend & Moving Averages**")
-            fig_profit = go.Figure()
-            fig_profit.add_trace(go.Scatter(x=d['df'].index, y=d['df']['High'], name='Price', line=dict(color='#00FF00', width=2)))
-            fig_profit.add_trace(go.Scatter(x=d['df'].index, y=d['df']['SMA_50'], name='50 SMA', line=dict(color='#FFA500', width=1, dash='dot')))
-            fig_profit.add_trace(go.Scatter(x=d['df'].index, y=d['df']['SMA_200'], name='200 SMA', line=dict(color='#1E90FF', width=1, dash='dot')))
-            fig_profit.update_layout(height=280, margin=dict(l=0,r=0,t=0,b=0), template="plotly_dark", showlegend=True, legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01))
-            st.plotly_chart(fig_profit, use_container_width=True)
-            
+            fig_p = go.Figure()
+            fig_p.add_trace(go.Scatter(x=data['df'].index, y=data['df']['Close'], name='Price', line=dict(color='#00FF00')))
+            fig_p.add_trace(go.Scatter(x=data['df'].index, y=data['df']['SMA_50'], name='50 SMA', line=dict(dash='dot', color='orange')))
+            fig_p.update_layout(height=350, title="Price Action", template="plotly_dark")
+            st.plotly_chart(fig_p, use_container_width=True)
         with c2:
-            st.markdown("📉 **Loss Trend (Lows)**")
-            fig_loss = go.Figure(go.Scatter(x=d['df'].index, y=d['df']['Low'], line=dict(color='#FF0000', width=2)))
-            fig_loss.update_layout(height=280, margin=dict(l=0,r=0,t=0,b=0), template="plotly_dark", yaxis=dict(autorange="reversed"))
-            st.plotly_chart(fig_loss, use_container_width=True)
-
-        if compare_code:
-            if compare_code == s_code:
-                st.warning(f"⚠️ Comparison stock cannot be the same as the main stock ({s_code}). Please enter a different symbol.")
-            else:
-                st.markdown(f"---")
-                st.markdown(f"⚔️ **Growth Comparison: {s_code} vs {compare_code}**")
-                with st.spinner(f"Fetching data for {compare_code}..."):
-                    try:
-                        df_comp = yf.Ticker(compare_code).history(period="3y")
-                        if not df_comp.empty:
-                            fig_comp = go.Figure()
-                            growth_main = (d['df']['Close'] / d['df']['Close'].iloc[0] - 1) * 100
-                            growth_sec = (df_comp['Close'] / df_comp['Close'].iloc[0] - 1) * 100
-                            fig_comp.add_trace(go.Scatter(x=d['df'].index, y=growth_main, name=s_code, line=dict(color='#00FF00', width=2)))
-                            fig_comp.add_trace(go.Scatter(x=df_comp.index, y=growth_sec, name=compare_code, line=dict(color='#1E90FF', width=2)))
-                            fig_comp.update_layout(height=300, margin=dict(l=0,r=0,t=0,b=0), template="plotly_dark", yaxis_title="Growth (%)")
-                            st.plotly_chart(fig_comp, use_container_width=True)
-                        else:
-                            st.warning(f"Could not find data for {compare_code}")
-                    except Exception:
-                        st.warning("Comparison failed. Check the second symbol.")
+            fig_l = go.Figure(go.Scatter(x=data['df'].index, y=data['df']['Low'], line=dict(color='red')))
+            fig_l.update_layout(height=350, title="Risk Trend (Lows)", template="plotly_dark", yaxis=dict(autorange="reversed"))
+            st.plotly_chart(fig_l, use_container_width=True)
 
         st.markdown("---")
-        
-        s1, s2 = st.columns(2)
-        with s1:
+        m_col, g_col = st.columns(2)
+        with m_col:
+            st.markdown("<h4 style='text-align: center;'>🧠 AI Sentiment Meter</h4>", unsafe_allow_html=True)
+            fig_gauge = go.Figure(go.Indicator(
+                mode = "gauge+number", value = data['ai']['score'],
+                gauge = {'axis': {'range': [0, 100]}, 'bar': {'color': "#4A90E2"},
+                         'steps' : [{'range': [0, 30], 'color': "red"}, {'range': [30, 70], 'color': "yellow"}, {'range': [70, 100], 'color': "green"}]}
+            ))
+            fig_gauge.update_layout(height=250, margin=dict(t=30, b=0), template="plotly_dark")
+            st.plotly_chart(fig_gauge, use_container_width=True)
+            
+        with g_col:
+            target_label = comp_ticker if comp_data else f"{data['fund']['sector']} Benchmark"
+            st.markdown(f"<h4 style='text-align: center;'>⚔️ Growth Comparison</h4>", unsafe_allow_html=True)
+            fig_comp = go.Figure()
+            fig_comp.add_trace(go.Scatter(x=data['df'].index, y=(data['df']['Close'] / data['df']['Close'].iloc[0] - 1) * 100, name=main_ticker, line=dict(color='#00FF00')))
+            try:
+                if comp_data:
+                    c_df = comp_data['df']
+                else:
+                    c_df = yf.Ticker(get_sector_benchmark(main_ticker, data['fund']['sector'])).history(period="3y")
+                
+                if not c_df.empty:
+                    fig_comp.add_trace(go.Scatter(x=c_df.index, y=(c_df['Close'] / c_df['Close'].iloc[0] - 1) * 100, name=target_label, line=dict(color='#1E90FF')))
+            except: pass
+            fig_comp.update_layout(height=250, margin=dict(t=30, b=0), template="plotly_dark", yaxis_title="Growth %")
+            st.plotly_chart(fig_comp, use_container_width=True)
+
+        # Head-to-Head Section
+        if comp_data:
+            st.markdown("---")
+            st.subheader(f"🥊 Head-to-Head: {main_ticker} vs {comp_ticker}")
+            st.markdown(f"""
+            | Metric | {main_ticker} | {comp_ticker} |
+            | :--- | :--- | :--- |
+            | **Sector** | {data['fund']['sector']} | {comp_data['fund']['sector']} |
+            | **Current Price** | ${data['price']:.2f} | ${comp_data['price']:.2f} |
+            | **Market Cap** | {data['fund']['mcap']} | {comp_data['fund']['mcap']} |
+            | **P/E Ratio** | {data['fund']['pe']} | {comp_data['fund']['pe']} |
+            | **AI Verdict** | {data['ai']['verdict']} | {comp_data['ai']['verdict']} |
+            | **Sentiment Score** | {data['ai']['score']}/100 | {comp_data['ai']['score']}/100 |
+            """)
+
+        if data.get('fin_data'):
+            st.markdown("---")
+            st.subheader("💰 Income Statement Highlights (Last 3 Years)")
+            fig_fin = go.Figure()
+            fig_fin.add_trace(go.Bar(x=data['fin_data']['dates'], y=data['fin_data']['revenue'], name='Revenue', marker_color='#4A90E2'))
+            fig_fin.add_trace(go.Bar(x=data['fin_data']['dates'], y=data['fin_data']['net_income'], name='Net Income', marker_color='#00FF00'))
+            fig_fin.update_layout(barmode='group', height=300, template="plotly_dark", margin=dict(t=30, b=0))
+            st.plotly_chart(fig_fin, use_container_width=True)
+
+        st.markdown("---")
+        i1, i2 = st.columns(2)
+        with i1:
             st.success("**🐂 Bullish Insights:**")
-            for p in d['bulls_list']: st.write(f"✅ {p}")
-        with s2:
+            for b in data['ai']['bulls']: st.write(f"✅ {b}")
+        with i2:
             st.error("**🐻 Bearish Risks:**")
-            for p in d['bears_list']: st.write(f"⚠️ {p}")
+            for b in data['ai']['bears']: st.write(f"⚠️ {b}")
 
         st.markdown("---")
-        
-        dl_col1, dl_col2 = st.columns(2)
-        with dl_col1:
-            pdf_out = generate_pdf(s_code, d, fig_profit, fig_loss)
-            st.download_button(label="📥 Download Pro PDF Report", data=pdf_out, file_name=f"{s_code}_Pro_Report.pdf", mime="application/pdf", use_container_width=True)
-        with dl_col2:
-            csv_data = d['df'].to_csv().encode('utf-8')
-            st.download_button(label="📊 Download Historical Data (CSV)", data=csv_data, file_name=f"{s_code}_historical_data.csv", mime="text/csv", use_container_width=True)
-
-        ticker_txt = "  •  ".join(d['news'])
-        st.markdown(f'<div class="ticker-wrap"><div class="ticker">{ticker_txt}</div></div>', unsafe_allow_html=True)
-    else:
-        st.error("Data Sync Failed. Check symbol format.")
-
-elif run and not s_code:
-    st.warning("Please enter a valid Stock Symbol to generate the report.")
-    
+        d1, d2 = st.columns(2)
+        with d1:
+            st.download_button("📥 Download Pro PDF Report", generate_pro_pdf(main_ticker, data, fig_p, fig_l, fig_gauge, fig_comp, comp_ticker, comp_data), f"{main_ticker}_Report.pdf", use_container_width=True)
+        with d2:
+            st.download_button("📊 Export CSV Data", data['df'].to_csv().encode('utf-8'), f"{main_ticker}.csv", use_container_width=True)
+    else: st.error("Sync Failed. Check symbol.")
 else:
-    st.markdown("<h1 style='text-align: center; margin-top: 15vh; color: #4A90E2;'>📊 Welcome to FinSight AI</h1>", unsafe_allow_html=True)
-    st.markdown("<h4 style='text-align: center; color: #A0A0A0;'>Enter a stock symbol in the sidebar to generate your AI-powered financial report.</h4>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; margin-top: 15vh; color: #4A90E2;'>📊 FinSight AI Pro</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; font-size: 1.2rem; color: #A0A0A0;'>Enter a stock ticker to start your analysis.</p>", unsafe_allow_html=True)
