@@ -133,9 +133,7 @@ def generate_pro_pdf(symbol, data, fig_p, fig_l, fig_gauge, fig_comp, comp_ticke
     except:
         return pdf.output(dest='S').encode('latin-1')
 
-# 5. Data Engine with Strict Normalization
-# 5. Data Engine with Strict Normalization (DEBUG MODE)
-@st.cache_data(ttl=60, show_spinner=False)
+# 5. Data Engine (CACHE REMOVED FOR DEBUGGING)
 def fetch_analysis(symbol):
     try:
         ticker = yf.Ticker(symbol)
@@ -170,15 +168,20 @@ def fetch_analysis(symbol):
                     fin_data = {"dates": dates, "revenue": rev.tolist(), "net_income": net.tolist()}
         except: pass
 
-        # --- UPDATED AI LOGIC WITH UI ERROR DISPLAY ---
+        # --- AI LOGIC WITH DEBUG OUTPUT ---
+        raw_content = ""
         try:
             agent = Agent(model=Gemini(id="gemini-2.0-flash", api_key=api_key))
-            prompt = f"""Analyze {symbol} in {sector}. You MUST respond ONLY with a raw JSON object. 
-            Do NOT include markdown tags like ```json.
+            # Changed prompt slightly to bypass financial advice filters
+            prompt = f"""You are a data analyzer. Analyze {symbol} in the {sector} sector based on general market trends.
+            Respond strictly with a JSON object and no other text.
             Format EXACTLY like this: {{"bulls": ["Point 1", "Point 2", "Point 3"], "bears": ["Point 1", "Point 2", "Point 3"], "verdict": "BUY", "score": 85}}"""
             
             resp = agent.run(prompt)
             raw_content = str(resp.content) if hasattr(resp, 'content') else str(resp)
+            
+            # 🔥 IDI NEE SCREEN PAINA AI EXACT ANSWER CHUPISTHUNDI
+            st.info(f"🔍 DEBUG - Raw AI Output: {raw_content}")
             
             clean_json = raw_content.replace('```json', '').replace('```', '').strip()
             match = re.search(r'\{.*\}', clean_json, re.DOTALL)
@@ -189,8 +192,8 @@ def fetch_analysis(symbol):
                 ai_json = json.loads(clean_json)
                 
         except Exception as e:
-            # IDI MAIN: UI lo error display chestundi
-            st.warning(f"🚨 Gemini API Error for {symbol}: {str(e)}") 
+            st.error(f"🚨 API Parsing Error: {str(e)}")
+            st.error(f"Raw text that caused error: {raw_content}")
             ai_json = {}
         # -------------------------------
 
@@ -215,7 +218,6 @@ def fetch_analysis(symbol):
     except Exception as e: 
         st.error(f"Data Fetch Error: {str(e)}")
         return None
-
 # 6. Sidebar
 with st.sidebar:
     st.title("📊 FinSight AI")
