@@ -6,6 +6,7 @@ import json
 import re
 import unicodedata
 import tempfile
+import time  # Added time module for API rate limiting
 from duckduckgo_search import DDGS
 from agno.agent import Agent
 from agno.models.google import Gemini
@@ -172,7 +173,6 @@ def fetch_analysis(symbol):
         raw_content = ""
         try:
             agent = Agent(model=Gemini(id="gemini-2.0-flash", api_key=api_key))
-            # Changed prompt slightly to bypass financial advice filters
             prompt = f"""You are a data analyzer. Analyze {symbol} in the {sector} sector based on general market trends.
             Respond strictly with a JSON object and no other text.
             Format EXACTLY like this: {{"bulls": ["Point 1", "Point 2", "Point 3"], "bears": ["Point 1", "Point 2", "Point 3"], "verdict": "BUY", "score": 85}}"""
@@ -180,8 +180,8 @@ def fetch_analysis(symbol):
             resp = agent.run(prompt)
             raw_content = str(resp.content) if hasattr(resp, 'content') else str(resp)
             
-            # 🔥 IDI NEE SCREEN PAINA AI EXACT ANSWER CHUPISTHUNDI
-            st.info(f"🔍 DEBUG - Raw AI Output: {raw_content}")
+            # Uncomment this if you still want to see the raw output
+            # st.info(f"🔍 DEBUG - Raw AI Output for {symbol}: {raw_content}")
             
             clean_json = raw_content.replace('```json', '').replace('```', '').strip()
             match = re.search(r'\{.*\}', clean_json, re.DOTALL)
@@ -192,8 +192,7 @@ def fetch_analysis(symbol):
                 ai_json = json.loads(clean_json)
                 
         except Exception as e:
-            st.error(f"🚨 API Parsing Error: {str(e)}")
-            st.error(f"Raw text that caused error: {raw_content}")
+            st.error(f"🚨 API Parsing Error for {symbol}: {str(e)}")
             ai_json = {}
         # -------------------------------
 
@@ -218,6 +217,7 @@ def fetch_analysis(symbol):
     except Exception as e: 
         st.error(f"Data Fetch Error: {str(e)}")
         return None
+
 # 6. Sidebar
 with st.sidebar:
     st.title("📊 FinSight AI")
@@ -227,9 +227,16 @@ with st.sidebar:
 
 # 7. Rendering Logic
 if run and main_ticker:
-    with st.spinner("Analyzing market intelligence..."):
+    with st.spinner("Analyzing main stock intelligence..."):
         data = fetch_analysis(main_ticker)
-        comp_data = fetch_analysis(comp_ticker) if comp_ticker and comp_ticker != main_ticker else None
+        
+    comp_data = None
+    if comp_ticker and comp_ticker != main_ticker:
+        # Added delay here to prevent API rate limiting
+        st.warning(f"⏳ Waiting 5 seconds before analyzing {comp_ticker} to avoid API Rate Limits...")
+        time.sleep(5)
+        with st.spinner(f"Analyzing {comp_ticker} intelligence..."):
+            comp_data = fetch_analysis(comp_ticker)
 
     if data:
         cols = st.columns(5)
