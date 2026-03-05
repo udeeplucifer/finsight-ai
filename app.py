@@ -82,7 +82,6 @@ def generate_pro_pdf(symbol, data, fig_p, fig_l, fig_gauge, fig_comp, comp_ticke
             pdf.cell(180, 10, "GROWTH COMPARISON", ln=True, align='C')
             pdf.image(t3.name, x=15, w=180)
             
-            # Head-to-Head Stats for PDF
             if comp_ticker and comp_data:
                 pdf.ln(10)
                 pdf.set_font("Helvetica", 'B', 14)
@@ -90,12 +89,10 @@ def generate_pro_pdf(symbol, data, fig_p, fig_l, fig_gauge, fig_comp, comp_ticke
                 pdf.ln(5)
                 pdf.set_font("Helvetica", 'B', 11)
                 
-                # Table Header
                 pdf.cell(60, 10, "Metric", border=1, align='C')
                 pdf.cell(60, 10, clean_for_pdf(symbol), border=1, align='C')
                 pdf.cell(60, 10, clean_for_pdf(comp_ticker), border=1, align='C', ln=True)
                 
-                # Table Rows
                 pdf.set_font("Helvetica", '', 11)
                 metrics = [
                     ("Sector", data['fund']['sector'], comp_data['fund']['sector']),
@@ -136,8 +133,9 @@ def generate_pro_pdf(symbol, data, fig_p, fig_l, fig_gauge, fig_comp, comp_ticke
     except:
         return pdf.output(dest='S').encode('latin-1')
 
-# 5. Data Engine
-@st.cache_data(ttl=3600, show_spinner=False)
+# 5. Data Engine with Strict Normalization
+# 5. Data Engine with Strict Normalization (DEBUG MODE)
+@st.cache_data(ttl=60, show_spinner=False)
 def fetch_analysis(symbol):
     try:
         ticker = yf.Ticker(symbol)
@@ -172,18 +170,29 @@ def fetch_analysis(symbol):
                     fin_data = {"dates": dates, "revenue": rev.tolist(), "net_income": net.tolist()}
         except: pass
 
-        agent = Agent(model=Gemini(id="gemini-2.0-flash", api_key=api_key))
-        prompt = f"""Analyze {symbol} in {sector}. Return strictly a JSON object. 
-        Format exactly like this:
-        {{"bulls": ["Point 1", "Point 2", "Point 3"], "bears": ["Point 1", "Point 2", "Point 3"], "verdict": "BUY/HOLD/SELL", "score": 50}}"""
-        resp = agent.run(prompt)
-        
+        # --- UPDATED AI LOGIC WITH UI ERROR DISPLAY ---
         try:
-            clean_json = re.sub(r'```json\s*', '', resp.content.strip())
-            clean_json = re.sub(r'```\s*', '', clean_json)
+            agent = Agent(model=Gemini(id="gemini-2.0-flash", api_key=api_key))
+            prompt = f"""Analyze {symbol} in {sector}. You MUST respond ONLY with a raw JSON object. 
+            Do NOT include markdown tags like ```json.
+            Format EXACTLY like this: {{"bulls": ["Point 1", "Point 2", "Point 3"], "bears": ["Point 1", "Point 2", "Point 3"], "verdict": "BUY", "score": 85}}"""
+            
+            resp = agent.run(prompt)
+            raw_content = str(resp.content) if hasattr(resp, 'content') else str(resp)
+            
+            clean_json = raw_content.replace('```json', '').replace('```', '').strip()
             match = re.search(r'\{.*\}', clean_json, re.DOTALL)
-            ai_json = json.loads(match.group()) if match else {}
-        except: ai_json = {}
+            
+            if match:
+                ai_json = json.loads(match.group())
+            else:
+                ai_json = json.loads(clean_json)
+                
+        except Exception as e:
+            # IDI MAIN: UI lo error display chestundi
+            st.warning(f"🚨 Gemini API Error for {symbol}: {str(e)}") 
+            ai_json = {}
+        # -------------------------------
 
         bulls = ai_json.get('bulls', [])
         if not isinstance(bulls, list) or len(bulls) < 3:
@@ -193,13 +202,19 @@ def fetch_analysis(symbol):
         if not isinstance(bears, list) or len(bears) < 3:
             bears = ["Macroeconomic volatility.", "Sector headwinds.", "Profit-taking resistance."]
             
-        verdict = ai_json.get('verdict', 'HOLD')
+        verdict = str(ai_json.get('verdict', 'HOLD')).upper()
         if not verdict or verdict == 'N/A' or verdict not in ['BUY', 'HOLD', 'SELL', 'STRONG BUY', 'STRONG SELL']:
             verdict = 'HOLD'
 
-        ai_data = {"bulls": bulls, "bears": bears, "verdict": verdict, "score": ai_json.get('score', 50)}
+        score = ai_json.get('score', 50)
+        if not isinstance(score, (int, float)):
+            score = 50
+
+        ai_data = {"bulls": bulls, "bears": bears, "verdict": verdict, "score": score}
         return {"df": df, "price": curr_p, "fund": fund, "ai": ai_data, "fin_data": fin_data}
-    except: return None
+    except Exception as e: 
+        st.error(f"Data Fetch Error: {str(e)}")
+        return None
 
 # 6. Sidebar
 with st.sidebar:
